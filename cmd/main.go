@@ -9,6 +9,7 @@ import (
 	"github.com/zduymz/hs-vault/backends"
 	"log"
 	"os"
+	"path"
 	"strings"
 )
 
@@ -186,6 +187,27 @@ func restore(c *cli.Context) error {
 		}
 		return nil
 	}
+	//default restore all engines
+	for key, engine := range engines {
+		ss := backends.NewSecretEngine(client,
+			&backends.SecretEngine{
+				Path: key,
+				Type: engine.Type,
+				UUID: engine.Uuid,
+			},
+			&backends.Options{
+				Base64Encode: c.Bool(FlagB64Encode),
+				RestorePath:  path.Join(c.String(FlagSource), fmt.Sprintf("%v.%v", key, engine.Type)),
+				LogLevel:     c.String(FlagLogLevel),
+			},
+			engine.getEngineType(),
+		)
+		err := ss.Restore(context.Background())
+		if err != nil {
+			log.Fatalln(err)
+		}
+	}
+
 	return nil
 }
 

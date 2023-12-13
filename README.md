@@ -9,6 +9,8 @@
 + backup most of the Vault engines using sys/raw endpoints (except Transit and SecretV2)
 + backup file was encoded by base64
 
+## Limits
++ SecretV2 "deleted" value will be treated as "destroyed"
 ## Build
 ```
 make build
