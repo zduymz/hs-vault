@@ -3,12 +3,11 @@
 **You don't need it in most cases. Use it with your own risk.**
 
 ## Prequsites
-+ Enabled [raw](https://www.vaultproject.io/api-docs/system/raw) endpoint if you use `raw` mode
-+ Must use `root` token
++ Some Engines require [raw](https://www.vaultproject.io/api-docs/system/raw) enabled to fully backup
++ Use `root` token
 ## Features
-+ backup most of the Vault engines using sys/raw endpoints (except Transit and SecretV2)
-+ backup file was encoded by base64
-+
++ backup and restore secret engines
++ base64 encoded output
 
 ## Limits
 + SecretV2 "deleted" value will be treated as "destroyed"  
