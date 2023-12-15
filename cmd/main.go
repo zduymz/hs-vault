@@ -67,6 +67,15 @@ func listEngines(v *vault.Client) (map[string]SecretEngineResponse, error) {
 	return secretEngines, nil
 }
 
+func checkRawAccessible(v *vault.Client) bool {
+	var ctx = context.Background()
+	_, err := v.System.RawList(ctx, "/")
+	if err != nil {
+		return false
+	}
+	return true
+}
+
 func getVaultClient() *vault.Client {
 	client, err := vault.New(vault.WithEnvironment())
 	if err != nil {
@@ -84,6 +93,8 @@ func backup(c *cli.Context) error {
 	if err != nil {
 		log.Fatalln(err)
 	}
+
+	rawAccessible := checkRawAccessible(client)
 
 	// namespace is set
 	if c.IsSet(FlagNamespace) {
@@ -107,9 +118,10 @@ func backup(c *cli.Context) error {
 				UUID: engine.Uuid,
 			},
 			&backends.Options{
-				Base64Encode: c.Bool(FlagB64Encode),
-				BackupPath:   c.String(FlagDest),
-				LogLevel:     c.String(FlagLogLevel),
+				Base64Encode:  c.Bool(FlagB64Encode),
+				BackupPath:    c.String(FlagDest),
+				LogLevel:      c.String(FlagLogLevel),
+				RawAccessible: rawAccessible,
 			},
 			engine.getEngineType(),
 		)
@@ -130,9 +142,10 @@ func backup(c *cli.Context) error {
 				UUID: engine.Uuid,
 			},
 			&backends.Options{
-				Base64Encode: c.Bool(FlagB64Encode),
-				BackupPath:   c.String(FlagDest),
-				LogLevel:     c.String(FlagLogLevel),
+				Base64Encode:  c.Bool(FlagB64Encode),
+				BackupPath:    c.String(FlagDest),
+				LogLevel:      c.String(FlagLogLevel),
+				RawAccessible: rawAccessible,
 			},
 			engine.getEngineType(),
 		)
@@ -151,6 +164,8 @@ func restore(c *cli.Context) error {
 	if err != nil {
 		log.Fatalln(err)
 	}
+
+	rawAccessible := checkRawAccessible(client)
 
 	// namespace is set
 	if c.IsSet(FlagNamespace) {
@@ -174,9 +189,10 @@ func restore(c *cli.Context) error {
 				UUID: engine.Uuid,
 			},
 			&backends.Options{
-				Base64Encode: c.Bool(FlagB64Encode),
-				LogLevel:     c.String(FlagLogLevel),
-				RestorePath:  c.String(FlagSource),
+				Base64Encode:  c.Bool(FlagB64Encode),
+				LogLevel:      c.String(FlagLogLevel),
+				RestorePath:   c.String(FlagSource),
+				RawAccessible: rawAccessible,
 			},
 			engine.getEngineType(),
 		)

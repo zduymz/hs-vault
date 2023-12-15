@@ -7,7 +7,7 @@ import (
 )
 
 type PKI struct {
-	*Raw
+	*Object
 }
 
 func (s *PKI) Backup(ctx context.Context) error {

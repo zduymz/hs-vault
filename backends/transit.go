@@ -2,33 +2,27 @@ package backends
 
 import (
 	"context"
+	"encoding/json"
 	"go.uber.org/zap"
-	"os"
 	"path"
-	"strings"
 )
 
 type Transit struct {
-	*Raw
+	*Object
 }
 
 func (t *Transit) Backup(ctx context.Context) error {
 	t.L.Info("Start backup Transit", zap.String("path", t.Engine.Path))
-	resp, err := t.Vault.List(ctx, path.Join(t.Engine.Path, "keys"))
+
+	// Backup in normal mode
+	paths, err := t.VaultWalk(ctx, t.Engine.Path, "keys")
 	if err != nil {
-		if strings.HasPrefix(err.Error(), "404") {
-			t.L.Debug("path is empty", zap.String("path", path.Join(t.Engine.Path, "keys")))
-			return nil
-		}
 		return err
 	}
 
-	for _, key := range resp.Data["keys"].([]interface{}) {
-		keyName := key.(string)
-		keyConfig := path.Join(t.Engine.Path, "keys", keyName, "config")
-
+	for _, p := range paths {
 		// enable exportable
-		if _, err := t.Vault.Write(ctx, keyConfig, map[string]interface{}{
+		if _, err := t.Vault.Write(ctx, path.Join(t.Engine.Path, p, "config"), map[string]interface{}{
 			"allow_plaintext_backup": true,
 			"exportable":             true,
 		}); err != nil {
@@ -36,22 +30,14 @@ func (t *Transit) Backup(ctx context.Context) error {
 		}
 
 		// backup
-		resp, err := t.Vault.Read(ctx, t.Engine.Path+"/backup/"+keyName)
+		data, err := t.Vault.Read(ctx, path.Join(t.Engine.Path, "backup", path.Base(p)))
 		if err != nil {
 			return err
 		}
 
-		// save to file
-		f, err := os.Create(path.Join(t.Options.BackupPath, keyName))
-		if err != nil {
+		if err := t.WriteVaultResponse(ctx, p, data.Data); err != nil {
 			return err
 		}
-
-		if _, err = f.WriteString(resp.Data["backup"].(string)); err != nil {
-			return err
-		}
-
-		_ = f.Close()
 	}
 
 	return nil
@@ -59,29 +45,24 @@ func (t *Transit) Backup(ctx context.Context) error {
 
 func (t *Transit) Restore(ctx context.Context) error {
 	t.L.Info("Start restore Transit", zap.String("path", t.Engine.Path))
-	files, err := os.ReadDir(t.Options.RestorePath)
-	if err != nil {
-		return nil
-	}
-	for _, file := range files {
-		// if directory found, ignore
-		if file.IsDir() {
-			t.L.Info("Skip directory", zap.String("name", file.Name()))
-			continue
-		}
 
-		// read file content
-		t.L.Debug("Transit read backup file", zap.String("name", file.Name()))
-		content, err := os.ReadFile(path.Join(t.Options.RestorePath, file.Name()))
+	paths, err := t.LocalWalk(ctx, t.Options.RestorePath, "keys")
+	if err != nil {
+		return err
+	}
+
+	for _, p := range paths {
+		data, err := t.ReadFileAndB64Decode(ctx, p)
 		if err != nil {
 			return err
 		}
 
-		// restore
-		t.L.Debug("Transit Restore", zap.String("name", path.Join(t.Engine.Path, "restore", file.Name())))
-		if _, err := t.Vault.Write(ctx, path.Join(t.Engine.Path, "restore", file.Name()), map[string]interface{}{
-			"backup": string(content),
-		}); err != nil {
+		payload := map[string]interface{}{}
+		if err := json.Unmarshal(data, &payload); err != nil {
+			return err
+		}
+
+		if _, err := t.Vault.Write(ctx, path.Join(t.Engine.Path, "restore", path.Base(p)), payload); err != nil {
 			return err
 		}
 	}

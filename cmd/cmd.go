@@ -10,6 +10,7 @@ const (
 	FlagB64Encode = "b64encode"
 	FlagLogLevel  = "log-level"
 	FlagNamespace = "namespace"
+	FlagUseRaw    = "raw"
 )
 
 func getCommand() []*cli.Command {
@@ -53,6 +54,11 @@ func getCommand() []*cli.Command {
 					Aliases: []string{"n"},
 					Usage:   "Vault namespace",
 				},
+				&cli.BoolFlag{
+					Name:    FlagUseRaw,
+					Aliases: []string{"r"},
+					Usage:   "Use sys/raw endpoint to backup",
+				},
 			},
 		},
 		{
@@ -81,6 +87,11 @@ func getCommand() []*cli.Command {
 					Name:    FlagNamespace,
 					Aliases: []string{"n"},
 					Usage:   "Vault namespace",
+				},
+				&cli.BoolFlag{
+					Name:    FlagUseRaw,
+					Aliases: []string{"r"},
+					Usage:   "Use sys/raw endpoint to backup",
 				},
 			},
 		},

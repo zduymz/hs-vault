@@ -36,7 +36,10 @@ type Options struct {
 	BackupPath     string
 	RestorePath    string
 	LogLevel       string
+	RawAccessible  bool
 }
+
+type Mode string
 
 type Engine interface {
 	Backup(context.Context) error
@@ -46,15 +49,15 @@ type Engine interface {
 type EngineType string
 
 const (
+	ADEngine       EngineType = "ad"
+	AWSEngine      EngineType = "aws"
+	DatabaseEngine EngineType = "database"
+	PKIEngine      EngineType = "pki"
 	RawEngine      EngineType = "raw"
 	SSHEngine      EngineType = "ssh"
-	TOTPEngine     EngineType = "totp"
-	ADEngine       EngineType = "ad"
-	PKIEngine      EngineType = "pki"
-	DatabaseEngine EngineType = "database"
 	SecretV1Engine EngineType = "kv"
 	SecretV2Engine EngineType = "kv2"
-	AWSEngine      EngineType = "aws"
+	TOTPEngine     EngineType = "totp"
 	TransitEngine  EngineType = "transit"
 )
 
@@ -82,41 +85,50 @@ func NewSecretEngine(v *vault.Client, e *SecretEngine, options *Options, et Engi
 	// restore mode
 	if options.RestorePath != "" {
 		ret := strings.TrimPrefix(path.Ext(path.Base(options.RestorePath)), ".")
+
+		if strings.HasSuffix(ret, "-r") {
+			ret = strings.TrimSuffix(ret, "-r")
+		}
+
 		if ret != string(et) {
 			log.Fatalln("Restore path does not match engine type")
 		}
 	}
 
-	raw := &Raw{
+	o := &Object{
 		Vault:   v,
 		Engine:  e,
 		Options: options,
 		L:       getLogger(options.LogLevel),
 	}
 
-	defer raw.L.Sync()
+	defer o.L.Sync()
+
+	if et == SecretV2Engine || et == TransitEngine {
+		options.RawAccessible = false
+	}
 
 	switch et {
 	case RawEngine:
 		return nil
 	case SSHEngine:
-		return &SSH{raw}
+		return &SSH{o}
 	case TOTPEngine:
-		return &TOTP{raw}
+		return &TOTP{o}
 	case ADEngine:
-		return &AD{raw}
+		return &AD{o}
 	case PKIEngine:
-		return &PKI{raw}
+		return &PKI{o}
 	case DatabaseEngine:
-		return &Database{raw}
+		return &Database{o}
 	case SecretV1Engine:
-		return &SecretV1{raw}
+		return &SecretV1{o}
 	case SecretV2Engine:
-		return &SecretV2{raw}
+		return &SecretV2{o}
 	case AWSEngine:
-		return &AWS{raw}
+		return &AWS{o}
 	case TransitEngine:
-		return &Transit{raw}
+		return &Transit{o}
 	}
 	return nil
 }

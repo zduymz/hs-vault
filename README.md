@@ -3,14 +3,29 @@
 **You don't need it in most cases. Use it with your own risk.**
 
 ## Prequsites
-+ Enabled [raw](https://www.vaultproject.io/api-docs/system/raw) endpoint
++ Enabled [raw](https://www.vaultproject.io/api-docs/system/raw) endpoint if you use `raw` mode
 + Must use `root` token
 ## Features
 + backup most of the Vault engines using sys/raw endpoints (except Transit and SecretV2)
 + backup file was encoded by base64
++
 
 ## Limits
-+ SecretV2 "deleted" value will be treated as "destroyed"
++ SecretV2 "deleted" value will be treated as "destroyed"  
++ 
+| Engine   | /sys/raw access required |
+|----------|:------------------------:|
+| TOTP     |            ✅             |
+| SecretV1 |            ❌             |
+| SecretV2 |            ❌             |
+| Transit  |            ❌             |
+| Database |            ⚠️            |
+| PKI      |            ✅             |
+| AWS      |            ⚠️             |
+| SSH      |⚠️|
+
+⚠️ Require /sys/raw access to backup private key or password in configuration
+
 ## Build
 ```
 make build

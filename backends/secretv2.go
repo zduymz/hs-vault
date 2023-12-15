@@ -2,21 +2,17 @@ package backends
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"github.com/hashicorp/vault-client-go"
 	"go.uber.org/zap"
 	"net/url"
-	"os"
 	"path"
-	"path/filepath"
 	"sort"
-	"strings"
 )
 
 type SecretV2 struct {
-	*Raw
+	*Object
 }
 
 type SecretV2Metadata struct {
@@ -36,59 +32,6 @@ type SecretV2KeyVersion struct {
 type SecretV2Backup struct {
 	MetaData SecretV2Metadata               `json:"metadata"`
 	Data     map[int]map[string]interface{} `json:"data"`
-}
-
-func (s *SecretV2) vaultWalk(ctx context.Context, prefix string, start string) ([]string, error) {
-	s.L.Debug("vaultWalk", zap.String("prefix", prefix), zap.String("start", start))
-	var files []string
-
-	resp, err := s.Vault.List(ctx, path.Join(prefix, start))
-	if err != nil {
-		if strings.HasPrefix(err.Error(), "404") {
-			s.L.Debug("path is empty", zap.String("path", path.Join(prefix, start)))
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	keys, _ := resp.Data["keys"]
-	for _, k := range keys.([]interface{}) {
-		key := k.(string)
-		if strings.HasSuffix(key, "/") {
-			fs, err := s.vaultWalk(ctx, prefix, path.Join(start, key))
-			if err != nil {
-				return nil, err
-			}
-			files = append(files, fs...)
-			continue
-		}
-		files = append(files, path.Join(start, key))
-	}
-
-	return files, nil
-}
-
-func (s *SecretV2) osWalk(ctx context.Context, prefix string, start string) ([]string, error) {
-	s.L.Debug("osWalk", zap.String("prefix", prefix), zap.String("start", start))
-	var output []string
-
-	files, err := os.ReadDir(path.Join(prefix, start))
-	if err != nil {
-		return nil, err
-	}
-	for _, f := range files {
-		if f.IsDir() {
-			fs, err := s.osWalk(ctx, prefix, filepath.Join(start, f.Name()))
-			if err != nil {
-				return nil, err
-			}
-			output = append(output, fs...)
-			continue
-		}
-		output = append(output, filepath.Join(start, f.Name()))
-	}
-
-	return output, nil
 }
 
 func (s *SecretV2) getMetaData(ctx context.Context, k string) (*SecretV2Metadata, error) {
@@ -122,9 +65,6 @@ func (s *SecretV2) backupSingleKey(ctx context.Context, key string) error {
 	// it's redundant but just make sure key is ordered
 	var versions []int
 	for k, _ := range meta.Versions {
-		//if v.Destroyed || v.DeletionTime != "" {
-		//	continue
-		//}
 		versions = append(versions, k)
 	}
 	sort.Ints(versions)
@@ -138,14 +78,6 @@ func (s *SecretV2) backupSingleKey(ctx context.Context, key string) error {
 			v2Data[v] = map[string]interface{}{}
 			continue
 		}
-
-		//options := vault.WithQueryParameters(url.Values{
-		//	"version": {fmt.Sprintf("%d", v)},
-		//})
-		//data, err := s.Vault.Read(ctx, path.Join(s.Engine.Path, "data", key), options)
-		//if err != nil {
-		//	return err
-		//}
 
 		data, err := s.readData(ctx, key, v)
 		if err != nil {
@@ -166,26 +98,27 @@ func (s *SecretV2) backupSingleKey(ctx context.Context, key string) error {
 		return err
 	}
 
-	b64content := base64.StdEncoding.EncodeToString(content)
+	return s.WriteB64Data(ctx, key, content)
 
-	//create full path file if it's not existed
-	oFile := path.Join(s.Options.BackupPath, key)
-	if _, err := os.Stat(path.Dir(oFile)); os.IsNotExist(err) {
-		if err := os.MkdirAll(path.Dir(oFile), 0755); err != nil {
-			return err
-		}
-	}
-
-	f, err := os.Create(oFile)
-	if err != nil {
-		return err
-	}
-	if _, err = f.WriteString(b64content); err != nil {
-		return err
-	}
-
-	_ = f.Close()
-	return nil
+	//b64content := base64.StdEncoding.EncodeToString(content)
+	//
+	////create full path file if it's not existed
+	//oFile := path.Join(s.Options.BackupPath, key)
+	//if _, err := os.Stat(path.Dir(oFile)); os.IsNotExist(err) {
+	//	if err := os.MkdirAll(path.Dir(oFile), 0755); err != nil {
+	//		return err
+	//	}
+	//}
+	//
+	//f, err := os.Create(oFile)
+	//if err != nil {
+	//	return err
+	//}
+	//if _, err = f.WriteString(b64content); err != nil {
+	//	return err
+	//}
+	//
+	//_ = f.Close()
 }
 
 // Create a fake destroyed/deleted version
@@ -247,14 +180,19 @@ func (s *SecretV2) destroyVersions(ctx context.Context, key string, versions []i
 
 func (s *SecretV2) restoreSingleKey(ctx context.Context, key string) error {
 	s.L.Debug("restoreSingleKey", zap.String("key", key))
-	bs, err := os.ReadFile(path.Join(s.Options.RestorePath, key))
-	if err != nil {
-		return err
-	}
 
-	bd, err := base64.StdEncoding.DecodeString(string(bs))
+	//bs, err := os.ReadFile(path.Join(s.Options.RestorePath, key))
+	//if err != nil {
+	//	return err
+	//}
+	//
+	//bd, err := base64.StdEncoding.DecodeString(string(bs))
+	//if err != nil {
+	//	s.L.Error("base64 decode error", zap.Error(err))
+	//	return err
+	//}
+	bd, err := s.ReadFileAndB64Decode(ctx, key)
 	if err != nil {
-		s.L.Error("base64 decode error", zap.Error(err))
 		return err
 	}
 
@@ -282,7 +220,7 @@ func (s *SecretV2) restoreSingleKey(ctx context.Context, key string) error {
 		}
 
 		if i == 1 {
-			// update metadata
+			// update metadata after first version was created
 			if err := s.writeMetaData(ctx, key, &backup.MetaData); err != nil {
 				return err
 			}
@@ -300,7 +238,7 @@ func (s *SecretV2) Backup(ctx context.Context) error {
 	s.L.Info("Start backup Secret V2", zap.String("path", s.Engine.Path))
 	keyPrefix := path.Join(s.Engine.Path, "metadata")
 
-	paths, err := s.vaultWalk(ctx, keyPrefix, "/")
+	paths, err := s.VaultWalk(ctx, keyPrefix, "/")
 	if err != nil {
 		return err
 	}
@@ -316,7 +254,7 @@ func (s *SecretV2) Backup(ctx context.Context) error {
 
 func (s *SecretV2) Restore(ctx context.Context) error {
 	s.L.Info("Start restore Secret V2", zap.String("path", s.Engine.Path))
-	files, err := s.osWalk(ctx, s.Options.RestorePath, "/")
+	files, err := s.LocalWalk(ctx, s.Options.RestorePath, "/")
 	if err != nil {
 		return nil
 	}
