@@ -2,8 +2,11 @@ package backends
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"go.uber.org/zap"
+	"os"
 	"path"
 )
 
@@ -14,16 +17,15 @@ type SecretV1 struct {
 func (s *SecretV1) Backup(ctx context.Context) error {
 	s.L.Info("Start backup Secret V1", zap.String("path", s.Engine.Path))
 
-	//if s.Options.RawAccessible {
-	//	keyPrefix := path.Join("logical", s.Engine.UUID)
-	//	return s.RawBackup(ctx, keyPrefix, "/")
-	//}
-
 	// Backup in normal mode
 	paths, err := s.VaultWalk(ctx, s.Engine.Path, "/")
 	if err != nil {
 		return err
 	}
+
+	records := 100
+	count := 0
+	payload := make(map[string]string, records)
 
 	for _, p := range paths {
 		data, err := s.Vault.Read(ctx, path.Join(s.Engine.Path, p))
@@ -31,8 +33,19 @@ func (s *SecretV1) Backup(ctx context.Context) error {
 			return err
 		}
 
-		if err := s.WriteVaultResponse(ctx, p, data.Data); err != nil {
+		bs, err := json.Marshal(data.Data)
+		if err != nil {
 			return err
+		}
+
+		payload[p] = base64.StdEncoding.EncodeToString(bs)
+		if len(payload) >= records {
+			content, _ := json.Marshal(payload)
+			if err := s.WriteData(ctx, fmt.Sprintf("file%d", count), content); err != nil {
+				return err
+			}
+			payload = make(map[string]string, records)
+			count += 1
 		}
 	}
 
@@ -41,30 +54,38 @@ func (s *SecretV1) Backup(ctx context.Context) error {
 
 func (s *SecretV1) Restore(ctx context.Context) error {
 	s.L.Info("Start restore Secret V1", zap.String("path", s.Engine.Path))
-	//if s.Options.RawAccessible {
-	//	keyPrefix := path.Join("logical", s.Engine.UUID)
-	//	return s.RawRestore(ctx, keyPrefix, "/")
-	//}
 
-	// Restore in normal mode
-	paths, err := s.LocalWalk(ctx, s.Options.RestorePath, "/")
+	files, err := s.LocalWalk(ctx, s.Options.RestorePath, "/")
 	if err != nil {
 		return err
 	}
 
-	for _, p := range paths {
-		data, err := s.ReadFileAndB64Decode(ctx, p)
+	for _, f := range files {
+		data, err := os.ReadFile(path.Join(s.Options.RestorePath, f))
 		if err != nil {
 			return err
 		}
 
-		d := map[string]interface{}{}
-		if err := json.Unmarshal(data, &d); err != nil {
+		entries := map[string]string{}
+		if err := json.Unmarshal(data, &entries); err != nil {
 			return err
 		}
 
-		if _, err := s.Vault.Write(ctx, path.Join(s.Engine.Path, p), d); err != nil {
-			return err
+		for key, b64value := range entries {
+			bs, err := base64.StdEncoding.DecodeString(b64value)
+			if err != nil {
+				return err
+			}
+
+			var value map[string]interface{}
+			if err := json.Unmarshal(bs, &value); err != nil {
+				return err
+			}
+
+			s.L.Debug("Restore key", zap.String("key", key))
+			if _, err := s.Vault.Write(ctx, path.Join(s.Engine.Path, key), value); err != nil {
+				return err
+			}
 		}
 	}
 

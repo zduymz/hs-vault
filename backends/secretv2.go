@@ -99,26 +99,6 @@ func (s *SecretV2) backupSingleKey(ctx context.Context, key string) error {
 	}
 
 	return s.WriteB64Data(ctx, key, content)
-
-	//b64content := base64.StdEncoding.EncodeToString(content)
-	//
-	////create full path file if it's not existed
-	//oFile := path.Join(s.Options.BackupPath, key)
-	//if _, err := os.Stat(path.Dir(oFile)); os.IsNotExist(err) {
-	//	if err := os.MkdirAll(path.Dir(oFile), 0755); err != nil {
-	//		return err
-	//	}
-	//}
-	//
-	//f, err := os.Create(oFile)
-	//if err != nil {
-	//	return err
-	//}
-	//if _, err = f.WriteString(b64content); err != nil {
-	//	return err
-	//}
-	//
-	//_ = f.Close()
 }
 
 // Create a fake destroyed/deleted version
@@ -150,7 +130,6 @@ func (s *SecretV2) readData(ctx context.Context, key string, version int) (map[s
 // Write metadata
 func (s *SecretV2) writeMetaData(ctx context.Context, key string, metadata *SecretV2Metadata) error {
 	s.L.Debug("writeMetaData", zap.String("key", key))
-	fmt.Println(metadata.CustomerMetadata)
 	if _, err := s.Vault.Write(ctx, path.Join(s.Engine.Path, "metadata", key), map[string]interface{}{
 		"max_versions":         metadata.MaxVersions,
 		"cas_required":         metadata.Cas,

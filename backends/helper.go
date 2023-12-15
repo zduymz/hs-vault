@@ -203,13 +203,31 @@ func (o *Object) ReadFileAndB64Decode(ctx context.Context, fp string) ([]byte, e
 	return bd, nil
 }
 
+func (o *Object) WriteData(ctx context.Context, fp string, content []byte) error {
+	of := path.Join(o.Options.BackupPath, fp)
+	if err := os.MkdirAll(path.Dir(of), 0755); err != nil {
+		o.L.Error("create directory error", zap.Error(err))
+		return err
+	}
+
+	f, err := os.Create(of)
+	if err != nil {
+		return err
+	}
+	if _, err = f.Write(content); err != nil {
+		return err
+	}
+
+	_ = f.Close()
+	return nil
+}
+
 func (o *Object) WriteB64Data(ctx context.Context, fp string, content []byte) error {
 	output := base64.StdEncoding.EncodeToString(content)
 	of := path.Join(o.Options.BackupPath, fp)
-	if _, err := os.Stat(path.Dir(of)); os.IsNotExist(err) {
-		if err := os.MkdirAll(path.Dir(of), 0755); err != nil {
-			return err
-		}
+	if err := os.MkdirAll(path.Dir(of), 0755); err != nil {
+		o.L.Error("create directory error", zap.Error(err))
+		return err
 	}
 
 	f, err := os.Create(of)
