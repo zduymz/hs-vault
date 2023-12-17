@@ -21,8 +21,11 @@ type Object struct {
 }
 
 func (o *Object) RawBackupSingleKey(ctx context.Context, keyPrefix, key string) error {
-	o.L.Debug("RawBackupSingleKey", zap.String("keyPrefix", keyPrefix), zap.String("key", key))
-	rdata, err := o.Vault.System.RawRead(ctx, path.Join(keyPrefix, key))
+	l := o.L.With(zap.String("method", "RawBackupSingleKey"))
+
+	vp := path.Join(keyPrefix, key)
+	l.Debug("Read raw data", zap.String("path", vp))
+	rdata, err := o.Vault.System.RawRead(ctx, vp)
 	if err != nil {
 		if strings.Contains(err.Error(), "being decompressed is empty") {
 			return nil
@@ -30,16 +33,16 @@ func (o *Object) RawBackupSingleKey(ctx context.Context, keyPrefix, key string) 
 		return err
 	}
 
-	f, err := os.Create(path.Join(o.Options.BackupPath, key))
+	of := path.Join(o.Options.BackupPath, key)
+	l.Debug("Create local file", zap.String("path", of))
+	f, err := os.Create(of)
 	if err != nil {
 		return nil
 	}
 
-	value := rdata.Data.Value
-	if o.Options.Base64Encode {
-		value = base64.StdEncoding.EncodeToString([]byte(rdata.Data.Value))
-	}
+	value := base64.StdEncoding.EncodeToString([]byte(rdata.Data.Value))
 
+	l.Debug("Write data to local file", zap.String("path", of))
 	if _, err = f.WriteString(value); err != nil {
 		return err
 	}
@@ -50,13 +53,18 @@ func (o *Object) RawBackupSingleKey(ctx context.Context, keyPrefix, key string) 
 // keyPrefix: logical/<uuid>
 // key: config or roles/<role>
 func (o *Object) RawRestoreSingleKey(ctx context.Context, keyPrefix, key string) error {
-	o.L.Debug("RawRestoreSingleKey", zap.String("keyPrefix", keyPrefix), zap.String("key", key))
-	content, err := os.ReadFile(path.Join(o.Options.RestorePath, key))
+	l := o.L.With(zap.String("method", "RawRestoreSingleKey"))
+
+	f := path.Join(o.Options.RestorePath, key)
+	l.Debug("Read local file", zap.String("path", f))
+	content, err := os.ReadFile(f)
 	if err != nil {
 		return err
 	}
 
-	if _, err = o.Vault.System.RawWrite(ctx, path.Join(keyPrefix, key), schema.RawWriteRequest{
+	vp := path.Join(keyPrefix, key)
+	l.Debug("Write raw data", zap.String("path", path.Join(keyPrefix, key)))
+	if _, err = o.Vault.System.RawWrite(ctx, vp, schema.RawWriteRequest{
 		Encoding: "base64",
 		Value:    string(content),
 	}); err != nil {
@@ -68,22 +76,31 @@ func (o *Object) RawRestoreSingleKey(ctx context.Context, keyPrefix, key string)
 // keyPrefix: logical/<uuid>
 // subKey: creds or roles
 func (o *Object) RawBackup(ctx context.Context, keyPrefix, subKey string) error {
-	o.L.Debug("RawBackup", zap.String("keyPrefix", keyPrefix), zap.String("subKey", subKey))
-	resp, err := o.Vault.System.RawList(ctx, path.Join(keyPrefix, subKey))
+	l := o.L.With(zap.String("method", "RawBackup"))
+
+	vp := path.Join(keyPrefix, subKey)
+	l.Debug("List raw path", zap.String("path", vp))
+	resp, err := o.Vault.System.RawList(ctx, vp)
 	if err != nil {
 		return err
 	}
 
-	// create backup/*subKey* folder if not existed
-	if _, err := os.Stat(path.Join(o.Options.BackupPath, subKey)); os.IsNotExist(err) {
-		if err := os.MkdirAll(path.Join(o.Options.BackupPath, subKey), 0755); err != nil {
-			return err
-		}
+	//if _, err := os.Stat(path.Join(o.Options.BackupPath, subKey)); os.IsNotExist(err) {
+	//	if err := os.MkdirAll(path.Join(o.Options.BackupPath, subKey), 0755); err != nil {
+	//		return err
+	//	}
+	//}
+	od := path.Join(o.Options.BackupPath, subKey)
+	l.Debug("Create local directory", zap.String("path", od))
+	if err := os.MkdirAll(od, 0755); err != nil {
+		return err
 	}
 
 	for _, key := range resp.Data.Keys {
+		l.Debug("Start backup process", zap.String("key", key))
 		// check if key is a folder
 		if strings.HasSuffix(key, "/") {
+			l.Debug("key is folder, checking inside", zap.String("key", key))
 			if err := o.RawBackup(ctx, keyPrefix, path.Join(subKey, key)); err != nil {
 				return err
 			}
@@ -99,29 +116,32 @@ func (o *Object) RawBackup(ctx context.Context, keyPrefix, subKey string) error 
 }
 
 func (o *Object) RawRestore(ctx context.Context, keyPrefix, subKey string) error {
-	o.L.Debug("RawRestore", zap.String("keyPrefix", keyPrefix), zap.String("subKey", subKey))
+	l := o.L.With(zap.String("method", "RawRestore"))
 
 	p := path.Join(o.Options.RestorePath, subKey)
-	// check directory exist
+	l.Debug("Check restore path exist", zap.String("path", p))
 	if _, err := os.Stat(p); os.IsNotExist(err) {
-		o.L.Warn("path does not exist", zap.String("path", p))
+		l.Warn("path does not exist", zap.String("path", p))
 		return nil
 	}
 
+	l.Debug("Read files from restore path", zap.String("path", p))
 	files, err := os.ReadDir(p)
 	if err != nil {
 		return err
 	}
 
 	for _, file := range files {
+		fp := path.Join(subKey, file.Name())
 		if file.IsDir() {
-			if err := o.RawRestore(ctx, keyPrefix, path.Join(subKey, file.Name())); err != nil {
+			if err := o.RawRestore(ctx, keyPrefix, fp); err != nil {
 				return err
 			}
 			continue
 		}
 
-		if err := o.RawRestoreSingleKey(ctx, keyPrefix, path.Join(subKey, file.Name())); err != nil {
+		l.Debug("Start restore process", zap.String("file", fp))
+		if err := o.RawRestoreSingleKey(ctx, keyPrefix, fp); err != nil {
 			return err
 		}
 	}
@@ -129,13 +149,15 @@ func (o *Object) RawRestore(ctx context.Context, keyPrefix, subKey string) error
 }
 
 func (o *Object) VaultWalk(ctx context.Context, prefix string, start string) ([]string, error) {
-	o.L.Debug("vaultWalk", zap.String("prefix", prefix), zap.String("start", start))
+	l := o.L.With(zap.String("method", "VaultWalk"))
 	var files []string
 
-	resp, err := o.Vault.List(ctx, path.Join(prefix, start))
+	vp := path.Join(prefix, start)
+	l.Debug("List vault path", zap.String("path", vp))
+	resp, err := o.Vault.List(ctx, vp)
 	if err != nil {
 		if strings.HasPrefix(err.Error(), "404") {
-			o.L.Debug("path is empty", zap.String("path", path.Join(prefix, start)))
+			o.L.Debug("path is empty", zap.String("path", vp))
 			return nil, nil
 		}
 		return nil, err
@@ -159,10 +181,12 @@ func (o *Object) VaultWalk(ctx context.Context, prefix string, start string) ([]
 }
 
 func (o *Object) LocalWalk(ctx context.Context, prefix string, start string) ([]string, error) {
-	o.L.Debug("LocalWalk", zap.String("prefix", prefix), zap.String("start", start))
+	l := o.L.With(zap.String("method", "LocalWalk"))
 	var output []string
 
-	files, err := os.ReadDir(path.Join(prefix, start))
+	lp := path.Join(prefix, start)
+	l.Debug("List local path", zap.String("path", lp))
+	files, err := os.ReadDir(lp)
 	if err != nil {
 		return nil, err
 	}
@@ -181,22 +205,21 @@ func (o *Object) LocalWalk(ctx context.Context, prefix string, start string) ([]
 	return output, nil
 }
 
-func (o *Object) NormalBackup(ctx context.Context, key string) error {
-
-	//return data.Data["data"].(map[string]interface{}), nil
-	return nil
-}
-
 // ReadFileAndB64Decode read local file and return base64 decoded data
-func (o *Object) ReadFileAndB64Decode(ctx context.Context, fp string) ([]byte, error) {
-	bs, err := os.ReadFile(path.Join(o.Options.RestorePath, fp))
+func (o *Object) ReadFileAndB64Decode(ctx context.Context, f string) ([]byte, error) {
+	l := o.L.With(zap.String("method", "ReadFileAndB64Decode"))
+
+	fp := path.Join(o.Options.RestorePath, f)
+	l.Debug("Read local file", zap.String("path", fp))
+	bs, err := os.ReadFile(f)
 	if err != nil {
 		return nil, err
 	}
 
+	l.Debug("Decode base64 data", zap.String("path", fp))
 	bd, err := base64.StdEncoding.DecodeString(string(bs))
 	if err != nil {
-		o.L.Error("base64 decode error", zap.Error(err))
+		l.Error("decode error", zap.Error(err))
 		return nil, err
 	}
 
@@ -204,16 +227,22 @@ func (o *Object) ReadFileAndB64Decode(ctx context.Context, fp string) ([]byte, e
 }
 
 func (o *Object) WriteData(ctx context.Context, fp string, content []byte) error {
+	l := o.L.With(zap.String("method", "WriteData"))
+
 	of := path.Join(o.Options.BackupPath, fp)
+	l.Debug("Create parent directory if needed", zap.String("path", of))
 	if err := os.MkdirAll(path.Dir(of), 0755); err != nil {
-		o.L.Error("create directory error", zap.Error(err))
+		l.Error("create error", zap.Error(err))
 		return err
 	}
 
+	l.Debug("Create local file", zap.String("path", of))
 	f, err := os.Create(of)
 	if err != nil {
 		return err
 	}
+
+	l.Debug("Write data to local file", zap.String("path", of))
 	if _, err = f.Write(content); err != nil {
 		return err
 	}
@@ -223,26 +252,15 @@ func (o *Object) WriteData(ctx context.Context, fp string, content []byte) error
 }
 
 func (o *Object) WriteB64Data(ctx context.Context, fp string, content []byte) error {
+	l := o.L.With(zap.String("method", "WriteB64Data"))
+	l.Debug("Encode base64 data", zap.String("path", fp))
 	output := base64.StdEncoding.EncodeToString(content)
-	of := path.Join(o.Options.BackupPath, fp)
-	if err := os.MkdirAll(path.Dir(of), 0755); err != nil {
-		o.L.Error("create directory error", zap.Error(err))
-		return err
-	}
-
-	f, err := os.Create(of)
-	if err != nil {
-		return err
-	}
-	if _, err = f.WriteString(output); err != nil {
-		return err
-	}
-
-	_ = f.Close()
-	return nil
+	return o.WriteData(ctx, fp, []byte(output))
 }
 
 func (o *Object) WriteVaultResponse(ctx context.Context, fp string, data map[string]interface{}) error {
+	l := o.L.With(zap.String("method", "WriteVaultResponse"))
+	l.Debug("Marshal data", zap.String("path", fp))
 	content, err := json.Marshal(data)
 	if err != nil {
 		return nil
@@ -252,13 +270,16 @@ func (o *Object) WriteVaultResponse(ctx context.Context, fp string, data map[str
 }
 
 func (o *Object) VaultRestoreRoles(ctx context.Context, dir string) error {
-	o.L.Info("Restore roles", zap.String("path", o.Engine.Path))
+	l := o.L.With(zap.String("method", "VaultRestoreRoles"))
+
+	l.Debug("List all local files", zap.String("path", path.Join(o.Options.RestorePath, dir)))
 	paths, err := o.LocalWalk(ctx, o.Options.RestorePath, dir)
 	if err != nil {
 		return err
 	}
 
 	for _, p := range paths {
+		l.Debug("Read local file and decode base64", zap.String("path", p))
 		data, err := o.ReadFileAndB64Decode(ctx, p)
 		if err != nil {
 			return err
@@ -269,7 +290,9 @@ func (o *Object) VaultRestoreRoles(ctx context.Context, dir string) error {
 			return err
 		}
 
-		if _, err := o.Vault.Write(ctx, path.Join(o.Engine.Path, p), payload); err != nil {
+		vp := path.Join(o.Engine.Path, p)
+		l.Debug("Write data to vault", zap.String("path", vp))
+		if _, err := o.Vault.Write(ctx, vp, payload); err != nil {
 			return err
 		}
 	}
@@ -277,18 +300,24 @@ func (o *Object) VaultRestoreRoles(ctx context.Context, dir string) error {
 }
 
 func (o *Object) VaultBackupRoles(ctx context.Context, dir string) error {
-	o.L.Info("Backup roles", zap.String("path", o.Engine.Path))
+	l := o.L.With(zap.String("method", "VaultRestoreRoles"))
+
+	l.Debug("List all vault paths", zap.String("path", path.Join(o.Engine.Path, dir)))
 	paths, err := o.VaultWalk(ctx, o.Engine.Path, dir)
 	if err != nil {
 		return err
 	}
 
 	for _, p := range paths {
-		data, err := o.Vault.Read(ctx, path.Join(o.Engine.Path, p))
+		vp := path.Join(o.Engine.Path, p)
+
+		l.Debug("Read data from vault", zap.String("path", vp))
+		data, err := o.Vault.Read(ctx, vp)
 		if err != nil {
 			return err
 		}
 
+		l.Debug("Process vault response")
 		if err := o.WriteVaultResponse(ctx, p, data.Data); err != nil {
 			return err
 		}

@@ -15,9 +15,9 @@ type SecretV1 struct {
 }
 
 func (s *SecretV1) Backup(ctx context.Context) error {
-	s.L.Info("Start backup Secret V1", zap.String("path", s.Engine.Path))
+	l := s.L.With(zap.String("method", "Backup"))
 
-	// Backup in normal mode
+	l.Debug("Start backup")
 	paths, err := s.VaultWalk(ctx, s.Engine.Path, "/")
 	if err != nil {
 		return err
@@ -28,11 +28,14 @@ func (s *SecretV1) Backup(ctx context.Context) error {
 	payload := make(map[string]string, records)
 
 	for _, p := range paths {
-		data, err := s.Vault.Read(ctx, path.Join(s.Engine.Path, p))
+		vp := path.Join(s.Engine.Path, p)
+		l.Debug("Backup key", zap.String("path", vp))
+		data, err := s.Vault.Read(ctx, vp)
 		if err != nil {
 			return err
 		}
 
+		l.Debug("Marshal data from local file")
 		bs, err := json.Marshal(data.Data)
 		if err != nil {
 			return err
@@ -40,8 +43,12 @@ func (s *SecretV1) Backup(ctx context.Context) error {
 
 		payload[p] = base64.StdEncoding.EncodeToString(bs)
 		if len(payload) >= records {
+			l.Debug("Marshal data from map value")
 			content, _ := json.Marshal(payload)
-			if err := s.WriteData(ctx, fmt.Sprintf("file%d", count), content); err != nil {
+
+			of := fmt.Sprintf("file%d.json", count)
+			l.Debug("Write a chunk data to file", zap.String("file", of))
+			if err := s.WriteData(ctx, of, content); err != nil {
 				return err
 			}
 			payload = make(map[string]string, records)
@@ -49,41 +56,58 @@ func (s *SecretV1) Backup(ctx context.Context) error {
 		}
 	}
 
+	if len(payload) > 0 {
+		l.Debug("Marshal last block data from map value")
+		content, _ := json.Marshal(payload)
+		of := fmt.Sprintf("file%d.json", count)
+		l.Debug("Write last chunk data to file", zap.String("file", of))
+		if err := s.WriteData(ctx, of, content); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
 func (s *SecretV1) Restore(ctx context.Context) error {
-	s.L.Info("Start restore Secret V1", zap.String("path", s.Engine.Path))
+	l := s.L.With(zap.String("method", "Restore"))
 
+	l.Debug("Start restore")
 	files, err := s.LocalWalk(ctx, s.Options.RestorePath, "/")
 	if err != nil {
 		return err
 	}
 
 	for _, f := range files {
-		data, err := os.ReadFile(path.Join(s.Options.RestorePath, f))
+		fp := path.Join(s.Options.RestorePath, f)
+		l.Debug("Read local file", zap.String("file", fp))
+		data, err := os.ReadFile(fp)
 		if err != nil {
 			return err
 		}
 
+		l.Debug("Unmarshal data from local file")
 		entries := map[string]string{}
 		if err := json.Unmarshal(data, &entries); err != nil {
 			return err
 		}
 
 		for key, b64value := range entries {
+			l.Debug("Decode base64 entry value", zap.String("key", key), zap.String("value", b64value))
 			bs, err := base64.StdEncoding.DecodeString(b64value)
 			if err != nil {
 				return err
 			}
 
+			l.Debug("Unmarshal data from key entry", zap.String("key", key))
 			var value map[string]interface{}
 			if err := json.Unmarshal(bs, &value); err != nil {
 				return err
 			}
 
-			s.L.Debug("Restore key", zap.String("key", key))
-			if _, err := s.Vault.Write(ctx, path.Join(s.Engine.Path, key), value); err != nil {
+			vp := path.Join(s.Engine.Path, key)
+			l.Debug("Write data to vault key", zap.String("key", vp))
+			if _, err := s.Vault.Write(ctx, vp, value); err != nil {
 				return err
 			}
 		}

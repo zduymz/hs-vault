@@ -95,11 +95,13 @@ func NewSecretEngine(v *vault.Client, e *SecretEngine, options *Options, et Engi
 		}
 	}
 
+	logger := getLogger(options.LogLevel)
+
 	o := &Object{
 		Vault:   v,
 		Engine:  e,
 		Options: options,
-		L:       getLogger(options.LogLevel),
+		L:       logger.With(zap.String("engine-path", e.Path), zap.String("engine-type", string(et))),
 	}
 
 	defer o.L.Sync()

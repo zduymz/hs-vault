@@ -68,10 +68,11 @@ type DatabaseConfig struct {
 //}
 
 func (s *Database) Backup(ctx context.Context) error {
-	s.L.Info("Start backup Database", zap.String("path", s.Engine.Path))
+	l := s.L.With(zap.String("method", "Backup"))
 
 	// config backup only support raw mode
 	if s.Options.RawAccessible {
+		l.Debug("Start backup config")
 		keyPrefix := path.Join("logical", s.Engine.UUID)
 		if err := s.RawBackup(ctx, keyPrefix, "config"); err != nil {
 			return err
@@ -79,11 +80,13 @@ func (s *Database) Backup(ctx context.Context) error {
 	}
 
 	// backup role
+	l.Debug("Start backup roles")
 	return s.VaultBackupRoles(ctx, "roles")
 }
 
 func (s *Database) Restore(ctx context.Context) error {
-	s.L.Info("Start restore Database", zap.String("path", s.Engine.Path))
+	l := s.L.With(zap.String("method", "Restore"))
+	l.Debug("Start restore config")
 
 	// restore config
 	var paths []string
@@ -93,15 +96,18 @@ func (s *Database) Restore(ctx context.Context) error {
 	}
 
 	if os.IsNotExist(err) {
-		s.L.Warn("No config directory found, skip restore Database configuration")
+		l.Warn("No config directory found, skip restore Database configuration")
 	}
 
 	for _, p := range paths {
+		l.Debug("Restore configuration", zap.String("path", p))
+		l.Debug("Read file and decode base64")
 		data, err := s.ReadFileAndB64Decode(ctx, p)
 		if err != nil {
 			return err
 		}
 
+		l.Debug("Unmarshal data")
 		var d DatabaseConfig
 		if err := json.Unmarshal(data, &d); err != nil {
 			return err
@@ -118,12 +124,13 @@ func (s *Database) Restore(ctx context.Context) error {
 			payload[k] = v
 		}
 
-		//fmt.Printf("%+v\n", payload)
-		if _, err := s.Vault.Write(ctx, path.Join(s.Engine.Path, p), payload); err != nil {
+		vp := path.Join(s.Engine.Path, p)
+		l.Debug("Write data to Vault", zap.String("path", vp))
+		if _, err := s.Vault.Write(ctx, vp, payload); err != nil {
 			return err
 		}
 	}
 
-	// restore role
+	l.Debug("Start restore roles")
 	return s.VaultRestoreRoles(ctx, "roles")
 }

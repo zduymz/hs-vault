@@ -13,10 +13,11 @@ type SSH struct {
 }
 
 func (s *SSH) Backup(ctx context.Context) error {
-	s.L.Info("Start backup SSH", zap.String("path", s.Engine.Path))
+	l := s.L.With(zap.String("method", "Backup"))
 
 	// backup config
 	if s.Options.RawAccessible {
+		l.Debug("Start backup config")
 		keyPrefix := path.Join("logical", s.Engine.UUID)
 		if err := s.RawBackup(ctx, keyPrefix, "config"); err != nil {
 			return err
@@ -24,31 +25,34 @@ func (s *SSH) Backup(ctx context.Context) error {
 	}
 
 	// backup roles
+	l.Debug("Start backup roles")
 	return s.VaultBackupRoles(ctx, "roles")
 }
 
 func (s *SSH) Restore(ctx context.Context) error {
-	s.L.Info("Start restore SSH", zap.String("path", s.Engine.Path))
+	l := s.L.With(zap.String("method", "Restore"))
 
 	// restore config
 	CAPublicKeyF := path.Join("config", "ca_public_key")
 	CAPrivateKeyF := path.Join("config", "ca_private_key")
 	var CAPublicKey, CAPrivateKey map[string]interface{}
 
+	l.Debug("Read and decode ca public key")
 	tmpCAPublicKey, err := s.ReadFileAndB64Decode(ctx, CAPublicKeyF)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
 
+	l.Debug("Read and decode ca private key")
 	tmpCAPrivateKey, err := s.ReadFileAndB64Decode(ctx, CAPrivateKeyF)
 	if err != nil != os.IsNotExist(err) {
 		return err
 	}
 
 	if tmpCAPrivateKey == nil || tmpCAPublicKey == nil {
-		s.L.Warn("Skip restore SSH config, because of missing CA keys")
+		l.Warn("Skip restore SSH config, because of missing CA keys")
 	} else {
-		s.L.Info("Restore SSH config")
+		l.Info("Start restore SSH config")
 		if err := json.Unmarshal(tmpCAPublicKey, &CAPublicKey); err != nil {
 			return err
 		}
@@ -66,5 +70,6 @@ func (s *SSH) Restore(ctx context.Context) error {
 	}
 
 	// restore roles
+	l.Info("Start restore SSH roles")
 	return s.VaultRestoreRoles(ctx, "roles")
 }

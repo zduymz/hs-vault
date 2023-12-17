@@ -25,8 +25,9 @@ type TOTPKey struct {
 }
 
 func (t *TOTP) Backup(ctx context.Context) error {
-	t.L.Info("Start backup TOTP", zap.String("path", t.Engine.Path))
+	l := t.L.With(zap.String("method", "Backup"))
 	if t.Options.RawAccessible {
+		l.Debug("Start backup TOTP")
 		keyPrefix := path.Join("logical", t.Engine.UUID)
 		return t.RawBackup(ctx, keyPrefix, "key")
 	}
@@ -36,14 +37,16 @@ func (t *TOTP) Backup(ctx context.Context) error {
 }
 
 func (t *TOTP) Restore(ctx context.Context) error {
-	t.L.Info("Start restore TOTP", zap.String("path", t.Engine.Path))
+	l := t.L.With(zap.String("method", "Backup"))
 
+	l.Debug("Start restore TOTP")
 	paths, err := t.LocalWalk(ctx, t.Options.RestorePath, "key/")
 	if err != nil {
 		return err
 	}
 
 	for _, p := range paths {
+		l.Debug("Restore TOTP key", zap.String("path", p))
 		bs, err := t.ReadFileAndB64Decode(ctx, p)
 		if err != nil {
 			return err
