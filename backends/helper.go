@@ -211,7 +211,7 @@ func (o *Object) ReadFileAndB64Decode(ctx context.Context, f string) ([]byte, er
 
 	fp := path.Join(o.Options.RestorePath, f)
 	l.Debug("Read local file", zap.String("path", fp))
-	bs, err := os.ReadFile(f)
+	bs, err := os.ReadFile(fp)
 	if err != nil {
 		return nil, err
 	}
